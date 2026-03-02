@@ -43,13 +43,22 @@ class handler(BaseHTTPRequestHandler):
 
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
-        got_secret = (qs.get("secret") or [""])[0]
+        got_secret = (qs.get("secret") or [""])[0].strip()
 
-        if not secret or secret != got_secret:
+        if not secret:
+            self.send_response(500)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(
+                b"WEBHOOK_SECRET is not set in this project. "
+                b"Add it in Vercel: Settings -> Environment Variables."
+            )
+            return
+        if secret != got_secret:
             self.send_response(403)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.end_headers()
-            self.wfile.write(b"Invalid or missing secret")
+            self.wfile.write(b"Invalid secret (value in URL does not match WEBHOOK_SECRET)")
             return
         if not token or not webhook_url:
             self.send_response(500)
