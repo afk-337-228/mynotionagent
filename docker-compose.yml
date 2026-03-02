@@ -1,0 +1,11 @@
+services:
+  bot:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    # Optional: persist state.db
+    volumes:
+      - ./data:/app/data
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - STATE_DB_PATH=/app/data/state.db
