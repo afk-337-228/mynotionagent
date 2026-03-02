@@ -382,6 +382,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "🎙 Не удалось распознать голос. Попробуй ещё раз или напиши текстом."
         )
         return
+    update.message.text = text
     await _process_note_text(update, context, text)
 
 
