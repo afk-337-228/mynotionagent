@@ -13,8 +13,10 @@ from urllib.parse import urlparse, parse_qs
 
 
 def _set_webhook(token: str, url: str) -> bool:
-    import urllib.request
     import json
+    import logging
+    import urllib.request
+    log = logging.getLogger(__name__)
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/setWebhook",
         data=json.dumps({"url": url}).encode("utf-8"),
@@ -24,7 +26,8 @@ def _set_webhook(token: str, url: str) -> bool:
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return r.status == 200
-    except Exception:
+    except Exception as e:
+        log.warning("setWebhook failed: %s", e)
         return False
 
 

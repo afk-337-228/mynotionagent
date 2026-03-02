@@ -45,9 +45,12 @@ def build_application() -> Application:
         raise ValueError("TELEGRAM_USER_ID is required")
     if not notion_key or not notion_parent:
         raise ValueError("NOTION_API_KEY and NOTION_PARENT_PAGE_ID are required")
+    parent_clean = notion_parent.strip().replace("-", "")
+    if len(parent_clean) != 32 or not all(c in "0123456789abcdefABCDEF" for c in parent_clean):
+        raise ValueError("NOTION_PARENT_PAGE_ID must be a 32-char hex UUID (with or without dashes)")
     if not openrouter_key:
         raise ValueError("OPENROUTER_API_KEY is required")
-    notion = NotionClient(api_key=notion_key, parent_page_id=notion_parent)
+    notion = NotionClient(api_key=notion_key, parent_page_id=notion_parent.strip())
     application = Application.builder().token(token).build()
     setup_handlers(
         application,
@@ -57,6 +60,11 @@ def build_application() -> Application:
         openrouter_base_url=openrouter_url,
     )
     _app = application
+    logger.info(
+        "Application built: allowed_user_id=%s, notion_parent_len=%s",
+        allowed_user_id,
+        len(notion_parent.strip()),
+    )
     return application
 
 

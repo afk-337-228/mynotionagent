@@ -38,7 +38,9 @@ def transcribe_file(file_path: str | Path) -> str:
     try:
         model = _get_model()
         segments, _ = model.transcribe(str(path), language="ru", beam_size=1)
-        return " ".join(s.text for s in segments if s.text).strip()
+        out = " ".join(s.text for s in segments if s.text).strip()
+        logger.debug("Transcribed: len=%s", len(out))
+        return out
     except Exception as e:
         logger.warning("Transcribe failed: %s", e)
         return ""

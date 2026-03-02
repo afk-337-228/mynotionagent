@@ -1,5 +1,6 @@
 .env
 PROMPT_FOR_DEV.md
+vercel-env-filled.txt
 __pycache__/
 *.py[cod]
 *$py.class
@@ -18,3 +19,4 @@ build/
 *.db
 *.sqlite3
 data/
+.vercel/

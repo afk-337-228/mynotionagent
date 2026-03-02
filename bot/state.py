@@ -118,6 +118,7 @@ def check_rate_limit(user_id: int) -> bool:
             )
             return True
         if count >= RATE_LIMIT_REQUESTS:
+            logger.debug("Rate limit exceeded for user_id=%s (count=%s)", user_id, count)
             return False
         c.execute(
             "UPDATE rate SET count = count + 1 WHERE user_id = ?", (user_id,)

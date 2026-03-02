@@ -1,12 +1,15 @@
 """
 Telegram message handlers: commands, text notes, voice, move note.
-Whitelist by TELEGRAM_USER_ID, rate limit 30/min, no response for unknown users.
+
+Access control: бот отвечает ИСКЛЮЧИТЕЛЬНО пользователю с TELEGRAM_USER_ID.
+Все остальные запросы игнорируются без ответа (проверка в webhook + _allowed в каждом handler).
+Rate limit: 30 запросов/мин на пользователя.
 """
 import logging
 import os
-import re
 import tempfile
 from datetime import datetime
+from functools import wraps
 from typing import Any
 
 from telegram import Update
@@ -41,19 +44,29 @@ CONFIDENCE_THRESHOLD = 0.6
 
 
 def _allowed(update: Update) -> bool:
+    """Единственный разрешённый пользователь — по TELEGRAM_USER_ID. Остальным не отвечаем."""
     if not update.effective_user:
         return False
-    return update.effective_user.id == ALLOWED_USER_ID
+    return int(update.effective_user.id) == ALLOWED_USER_ID
 
 
-async def _silent_ignore(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-    """Do nothing (for non-whitelisted users)."""
-    pass
+def _require_allowed_and_rate_limit(handler):
+    """Decorator: skip if not allowed user; if rate limit exceeded, reply and skip."""
 
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not _allowed(update):
+            return
+        user_id = update.effective_user.id if update.effective_user else 0
+        if not check_rate_limit(user_id):
+            logger.info("Rate limit exceeded for user_id=%s", user_id)
+            if update.message:
+                await update.message.reply_text(
+                    "⚠️ Слишком много запросов. Подожди около минуты."
+                )
+            return
+        return await handler(update, context)
 
-def _reply_text(update: Update, text: str) -> None:
-    """Send text reply (call from async handler with await update.message.reply_text)."""
-    pass  # used only in docstring; real calls use await update.message.reply_text(text)
+    return wrapper
 
 
 async def _save_note_and_respond(
@@ -115,6 +128,7 @@ async def _save_note_and_respond(
             f"📅 Дата: {today}\n"
             f"🔗 Открыть в Notion: {link}"
         )
+    logger.info("Note saved: category=%s, user_id=%s", category, user_id)
     await update.message.reply_text(msg)
     return True
 
@@ -159,11 +173,8 @@ def _parse_move_command(text: str) -> tuple[str | None, str | None] | None:
     return None
 
 
+@_require_allowed_and_rate_limit
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _allowed(update):
-        return
-    if not check_rate_limit(update.effective_user.id):
-        return
     await update.message.reply_text(
         "Привет! Я бот для заметок в Notion.\n\n"
         "Отправь текст или голосовое — я определю категорию и сохраню в Notion.\n"
@@ -172,11 +183,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+@_require_allowed_and_rate_limit
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _allowed(update):
-        return
-    if not check_rate_limit(update.effective_user.id):
-        return
     await update.message.reply_text(
         "Команды:\n"
         "/start — приветствие\n"
@@ -193,20 +201,14 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+@_require_allowed_and_rate_limit
 async def cmd_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _allowed(update):
-        return
-    if not check_rate_limit(update.effective_user.id):
-        return
     lines = ["Категории Notion:"] + [f"• {c}" for c in CATEGORIES]
     await update.message.reply_text("\n".join(lines))
 
 
+@_require_allowed_and_rate_limit
 async def cmd_last(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _allowed(update):
-        return
-    if not check_rate_limit(update.effective_user.id):
-        return
     if not NOTION:
         await update.message.reply_text("⚠️ Notion не настроен.")
         return
@@ -227,11 +229,8 @@ async def cmd_last(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("\n".join(lines))
 
 
+@_require_allowed_and_rate_limit
 async def cmd_init(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _allowed(update):
-        return
-    if not check_rate_limit(update.effective_user.id):
-        return
     if not NOTION:
         await update.message.reply_text("⚠️ Notion не настроен.")
         return
@@ -256,7 +255,7 @@ async def handle_pending_reply(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         chosen = normalize_category(text)
         if chosen and chosen not in options:
-            chosen = None  # allow any category from full list
+            chosen = None
         if not chosen and options:
             for o in options:
                 if o.lower() == text.lower():
@@ -305,33 +304,25 @@ async def handle_move(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
     return True
 
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _allowed(update):
+async def _process_note_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
+) -> None:
+    """Обработка текста заметки: pending/move/explicit/classify. Без проверки allowed/rate_limit."""
+    if not text or not text.strip():
         return
-    if not check_rate_limit(update.effective_user.id):
-        return
-    if not update.message or not update.message.text:
-        return
-    text = update.message.text.strip()
-    if not text:
-        return
-
+    text = text.strip()
     if await handle_pending_reply(update, context):
         return
     if await handle_move(update, context):
         return
 
-    # Explicit category
     explicit = _parse_explicit_category(text)
     if explicit:
         category, note_text = explicit
         url = extract_url_from_text(note_text) if category in ("Ссылки / Статьи", "Полезные сайты") else None
-        await _save_note_and_respond(
-            update, context, category, note_text, url=url
-        )
+        await _save_note_and_respond(update, context, category, note_text, url=url)
         return
 
-    # Classify
     result = classify(
         text,
         api_key=OPENROUTER_API_KEY,
@@ -357,11 +348,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _save_note_and_respond(update, context, category, text, url=url)
 
 
+@_require_allowed_and_rate_limit
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.text:
+        return
+    await _process_note_text(update, context, update.message.text)
+
+
+@_require_allowed_and_rate_limit
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _allowed(update):
-        return
-    if not check_rate_limit(update.effective_user.id):
-        return
     if not update.message or not update.message.voice:
         return
     voice = update.message.voice
@@ -387,9 +382,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "🎙 Не удалось распознать голос. Попробуй ещё раз или напиши текстом."
         )
         return
-    # Process as text (reuse logic by faking a text message)
-    update.message.text = text
-    await handle_text(update, context)
+    await _process_note_text(update, context, text)
 
 
 def setup_handlers(

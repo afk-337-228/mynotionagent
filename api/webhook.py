@@ -17,11 +17,32 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
 
+def _sender_id_from_update(data: dict) -> int | None:
+    """Extract sender user id from Telegram update (message, callback_query, etc.)."""
+    for key in ("message", "edited_message", "callback_query", "channel_post"):
+        obj = data.get(key)
+        if not obj:
+            continue
+        from_obj = obj.get("from") if isinstance(obj, dict) else None
+        if from_obj and isinstance(from_obj.get("id"), (int, float)):
+            return int(from_obj["id"])
+    return None
+
+
 def _process_update_sync(body: bytes) -> None:
+    data = json.loads(body.decode("utf-8"))
+    try:
+        allowed_id_str = os.getenv("TELEGRAM_USER_ID", "").strip()
+        allowed_id = int(allowed_id_str) if allowed_id_str else None
+    except ValueError:
+        allowed_id = None
+    sender_id = _sender_id_from_update(data)
+    if allowed_id is None or sender_id is None or sender_id != allowed_id:
+        logger.debug("Ignoring update from user_id=%s (not allowed)", sender_id)
+        return
     from telegram import Update
     from bot.main import build_application
     app = build_application()
-    data = json.loads(body.decode("utf-8"))
     update = Update.de_json(data, app.bot)
     asyncio.run(app.process_update(update))
 

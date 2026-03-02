@@ -170,6 +170,16 @@ python -m bot.main
 
 ---
 
+## Тесты
+
+Из корня проекта:
+```bash
+python -m unittest discover -s tests -v
+```
+Проверяются парсинг команд, нормализация категорий, извлечение URL, санитизация текста для классификатора.
+
+---
+
 ## Структура проекта
 
 ```
@@ -191,7 +201,11 @@ notion-telegram-bot/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── requirements.txt
-└── README.md
+├── README.md
+└── tests/
+    ├── test_classifier.py
+    ├── test_handlers_parse.py
+    └── test_notion_client.py
 ```
 
 ---

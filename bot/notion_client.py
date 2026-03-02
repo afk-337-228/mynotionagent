@@ -3,11 +3,11 @@ Notion API: create/ensure databases, add pages, query, archive.
 Retry with exponential backoff (Notion ~3 req/s).
 """
 import logging
+import re
 import time
 from typing import Any
 
 from notion_client import Client
-from notion_client.api_endpoints import BlockChildrenEndpoint, DatabasesEndpoint
 from notion_client.errors import APIResponseError
 
 logger = logging.getLogger(__name__)
@@ -79,11 +79,12 @@ def _retry(fn, *args, max_retries: int = 5, **kwargs) -> Any:
         try:
             return fn(*args, **kwargs)
         except APIResponseError as e:
-            if e.code == "rate_limited" and attempt < max_retries - 1:
-                wait = 2 ** attempt
+            if getattr(e, "code", None) == "rate_limited" and attempt < max_retries - 1:
+                wait = 2**attempt
                 logger.warning("Notion rate limit, retry in %s sec", wait)
                 time.sleep(wait)
                 continue
+            logger.error("Notion API error: %s", e)
             raise
         except Exception:
             raise
@@ -190,8 +191,7 @@ def normalize_category(user_input: str) -> str | None:
 
 
 def extract_url_from_text(text: str) -> str | None:
-    import re
-    m = re.search(r"https?://[^\s]+", text)
+    m = re.search(r"https?://[^\s]+", text or "")
     return m.group(0).rstrip(".,;:)") if m else None
 
 
@@ -244,7 +244,7 @@ class NotionClient:
                 "database_title": category,
             }
         except Exception as e:
-            logger.exception("Notion create_page failed: %s", e)
+            logger.exception("Notion create_page failed for category=%s", category, exc_info=False)
             return None
 
     def get_recent_pages(self, limit: int = 5) -> list[dict]:
