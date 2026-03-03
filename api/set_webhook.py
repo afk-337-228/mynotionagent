@@ -37,6 +37,11 @@ def _set_webhook(token: str, url: str) -> bool:
 
 
 class handler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        self.send_response(405)
+        self.send_header("Allow", "GET")
+        self.end_headers()
+
     def do_GET(self):
         secret = os.getenv("WEBHOOK_SECRET", "").strip()
         token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()

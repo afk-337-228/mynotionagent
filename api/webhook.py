@@ -54,6 +54,11 @@ def _process_update_sync(body: bytes) -> None:
 
 
 class handler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        self.send_response(405)
+        self.send_header("Allow", "POST")
+        self.end_headers()
+
     def do_POST(self):
         try:
             content_length = int(self.headers.get("Content-Length", 0))
