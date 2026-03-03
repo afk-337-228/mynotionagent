@@ -13,6 +13,7 @@ Open-source Telegram-бот для личного использования: п
    (перед этим создай папку `data/` при необходимости: `mkdir data`)
 4. **Без Docker:**  
    `pip install -r requirements.txt`  
+   (для голосовых сообщений дополнительно: `pip install -r requirements-voice.txt`)  
    `python -m bot.main`  
    (запуск из корня репозитория.)
 
@@ -67,7 +68,7 @@ Open-source Telegram-бот для личного использования: п
 
 ## Деплой на Vercel (хостинг бота)
 
-Бот может работать в режиме **webhook**: Telegram шлёт обновления на твой URL, Vercel обрабатывает их в serverless-функции. Репозиторий уже подготовлен для Vercel.
+Бот может работать в режиме **webhook**: Telegram шлёт обновления на твой URL, Vercel обрабатывает их в serverless-функции. Репозиторий уже подготовлен для Vercel. На Vercel **голосовые сообщения не обрабатываются** (нет `faster-whisper` в бандле); для голоса запускай бота локально и установи `pip install -r requirements-voice.txt`.
 
 ### Шаг 1. Подключи репозиторий к Vercel
 

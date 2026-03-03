@@ -13,7 +13,11 @@ if os.path.dirname(os.path.dirname(os.path.abspath(__file__))) not in sys.path:
 
 from http.server import BaseHTTPRequestHandler
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
+)
 logger = logging.getLogger(__name__)
 
 
@@ -37,9 +41,11 @@ def _process_update_sync(body: bytes) -> None:
     except ValueError:
         allowed_id = None
     sender_id = _sender_id_from_update(data)
+    update_id = data.get("update_id", "?")
     if allowed_id is None or sender_id is None or sender_id != allowed_id:
-        logger.debug("Ignoring update from user_id=%s (not allowed)", sender_id)
+        logger.debug("Ignoring update_id=%s from user_id=%s (not allowed)", update_id, sender_id)
         return
+    logger.info("Processing update_id=%s from user_id=%s", update_id, sender_id)
     from telegram import Update
     from bot.main import build_application
     app = build_application()
@@ -52,6 +58,7 @@ class handler(BaseHTTPRequestHandler):
         try:
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length) if content_length else b""
+            logger.debug("Webhook POST body_size=%s", len(body))
             if body:
                 _process_update_sync(body)
         except Exception as e:

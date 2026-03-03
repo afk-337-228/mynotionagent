@@ -25,9 +25,14 @@ def _set_webhook(token: str, url: str) -> bool:
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
-            return r.status == 200
+            ok = r.status == 200
+            if ok:
+                log.info("setWebhook success: url=%s", url)
+            else:
+                log.warning("setWebhook unexpected status: url=%s status=%s", url, r.status)
+            return ok
     except Exception as e:
-        log.warning("setWebhook failed: %s", e)
+        log.warning("setWebhook failed: url=%s error=%s", url, e)
         return False
 
 

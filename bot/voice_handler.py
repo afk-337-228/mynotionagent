@@ -7,16 +7,24 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded model (tiny or base for CPU)
+# Lazy-loaded model (tiny or base for CPU). None if faster_whisper not installed (e.g. Vercel).
 _model = None
 _model_name = "tiny"
+_whisper_unavailable = False
 
 
 def _get_model():
-    global _model
+    global _model, _whisper_unavailable
+    if _whisper_unavailable:
+        return None
     if _model is None:
-        from faster_whisper import WhisperModel
-        _model = WhisperModel(_model_name, device="cpu", compute_type="int8")
+        try:
+            from faster_whisper import WhisperModel
+            _model = WhisperModel(_model_name, device="cpu", compute_type="int8")
+        except ImportError:
+            logger.info("faster_whisper not installed; voice messages will not be transcribed (e.g. on Vercel)")
+            _whisper_unavailable = True
+            return None
     return _model
 
 
@@ -35,14 +43,17 @@ def transcribe_file(file_path: str | Path) -> str:
     path = Path(file_path)
     if not path.exists():
         return ""
+    model = _get_model()
+    if model is None:
+        return ""
     try:
-        model = _get_model()
+        size_bytes = path.stat().st_size if path.exists() else 0
         segments, _ = model.transcribe(str(path), language="ru", beam_size=1)
         out = " ".join(s.text for s in segments if s.text).strip()
-        logger.debug("Transcribed: len=%s", len(out))
+        logger.info("Transcribed: path=%s size_bytes=%s out_len=%s", path.name, size_bytes, len(out))
         return out
     except Exception as e:
-        logger.warning("Transcribe failed: %s", e)
+        logger.warning("Transcribe failed: path=%s error=%s", path, e)
         return ""
 
 

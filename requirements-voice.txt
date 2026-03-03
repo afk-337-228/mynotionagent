@@ -1,0 +1,2 @@
+# Optional: for local voice transcription (not used on Vercel)
+faster-whisper>=1.0.0

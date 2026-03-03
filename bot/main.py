@@ -4,6 +4,7 @@ Supports polling (local/Docker) and webhook (Vercel).
 """
 import logging
 import os
+import sys
 
 from dotenv import load_dotenv
 from telegram import Update
@@ -15,8 +16,11 @@ from bot.notion_client import NotionClient
 load_dotenv()
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 logging.basicConfig(
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format=LOG_FORMAT,
+    datefmt=LOG_DATEFMT,
     level=getattr(logging, LOG_LEVEL, logging.INFO),
 )
 logger = logging.getLogger(__name__)
@@ -61,9 +65,9 @@ def build_application() -> Application:
     )
     _app = application
     logger.info(
-        "Application built: allowed_user_id=%s, notion_parent_len=%s",
+        "Application built: allowed_user_id=%s, notion_parent=%s...",
         allowed_user_id,
-        len(notion_parent.strip()),
+        notion_parent.strip()[:8] + "..." if len(notion_parent.strip()) > 8 else notion_parent.strip(),
     )
     return application
 
@@ -71,8 +75,12 @@ def build_application() -> Application:
 def main() -> None:
     """Run bot in polling mode (local or Docker)."""
     app = build_application()
-    logger.info("Bot starting (polling)")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("Bot starting (polling), log_level=%s", LOG_LEVEL)
+    try:
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+    except KeyboardInterrupt:
+        logger.info("Bot stopped (Ctrl+C)")
+        sys.exit(0)
 
 
 if __name__ == "__main__":

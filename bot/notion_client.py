@@ -79,12 +79,19 @@ def _retry(fn, *args, max_retries: int = 5, **kwargs) -> Any:
         try:
             return fn(*args, **kwargs)
         except APIResponseError as e:
-            if getattr(e, "code", None) == "rate_limited" and attempt < max_retries - 1:
+            code = getattr(e, "code", None)
+            if code == "rate_limited" and attempt < max_retries - 1:
                 wait = 2**attempt
-                logger.warning("Notion rate limit, retry in %s sec", wait)
+                logger.warning(
+                    "Notion rate limit (attempt %s/%s), retry in %s sec",
+                    attempt + 1, max_retries, wait,
+                )
                 time.sleep(wait)
                 continue
-            logger.error("Notion API error: %s", e)
+            logger.error(
+                "Notion API error: code=%s message=%s",
+                code, getattr(e, "message", str(e)),
+            )
             raise
         except Exception:
             raise
@@ -212,6 +219,48 @@ class NotionClient:
         self._ensure_db_ids()
         return self._db_ids.get(category)
 
+    def _get_database_schema(self, db_id: str) -> dict[str, str]:
+        """Return dict: property_name -> type (e.g. 'title', 'rich_text', 'date', 'select').
+        Supports Notion API 2025: schema is in data_sources[].retrieve, not in database.properties.
+        """
+        try:
+            db = _retry(self._client.databases.retrieve, database_id=db_id)
+            raw_props = db.get("properties") or getattr(db, "properties", None) or {}
+            if not raw_props and db.get("data_sources"):
+                ds_list = db["data_sources"]
+                if isinstance(ds_list, list) and ds_list and isinstance(ds_list[0], dict):
+                    ds_id = ds_list[0].get("id")
+                    if ds_id:
+                        ds = _retry(self._client.data_sources.retrieve, data_source_id=ds_id)
+                        raw_props = ds.get("properties") or {}
+                        logger.debug("DB %s: schema from data_source %s", db_id[:8], ds_id[:8])
+            if not isinstance(raw_props, dict):
+                logger.warning("DB %s properties is not a dict: type=%s", db_id[:8], type(raw_props).__name__)
+                return {}
+            out = {}
+            for key, cfg in raw_props.items():
+                if not isinstance(cfg, dict) or "type" not in cfg:
+                    continue
+                prop_type = cfg.get("type")
+                display_name = cfg.get("name") or key
+                if isinstance(display_name, list):
+                    display_name = "".join(t.get("plain_text", "") for t in display_name) if display_name else key
+                if isinstance(display_name, str) and display_name:
+                    out[display_name] = prop_type
+                if key != display_name and isinstance(key, str):
+                    out[key] = prop_type
+            if not out and raw_props:
+                logger.warning(
+                    "Schema empty for db %s but properties had %s keys (first: %s)",
+                    db_id[:8], len(raw_props), list(raw_props.keys())[:5],
+                )
+            else:
+                logger.info("Schema for db %s: %s props, names=%s", db_id[:8], len(out), list(out.keys())[:15])
+            return out
+        except Exception as e:
+            logger.warning("Could not retrieve database schema for db_id=%s: %s", db_id[:8], e)
+            return {}
+
     def create_page(
         self,
         category: str,
@@ -228,23 +277,42 @@ class NotionClient:
         db_id = self._db_ids.get(category)
         if not db_id:
             return None
-        props = _build_properties(
+        raw_props = _build_properties(
             category, title, notes, url=url, author=author, status=status, due_date=due_date
         )
+        schema = self._get_database_schema(db_id)
+        props = _align_properties_to_schema(raw_props, schema)
+        if not props:
+            schema_preview = dict(list(schema.items())[:10])
+            logger.warning(
+                "No matching properties: category=%s db_id=%s schema=%s",
+                category, db_id[:8], schema_preview,
+            )
+            return None
+        if schema and set(props.keys()) != set(raw_props.keys()):
+            logger.debug("Aligned props for %s: %s -> %s", category, list(raw_props.keys()), list(props.keys()))
         try:
             page = _retry(
                 self._client.pages.create,
                 parent={"database_id": db_id},
                 properties=props,
             )
+            page_id = page["id"]
+            logger.info(
+                "Page created: category=%s page_id=%s db_id=%s",
+                category, page_id[:8] + "..." if len(page_id) > 8 else page_id, db_id[:8] + "...",
+            )
             return {
-                "id": page["id"],
+                "id": page_id,
                 "url": page.get("url"),
                 "database_id": db_id,
                 "database_title": category,
             }
         except Exception as e:
-            logger.exception("Notion create_page failed for category=%s", category, exc_info=False)
+            logger.exception(
+                "Notion create_page failed: category=%s db_id=%s error=%s",
+                category, db_id[:8], e, exc_info=False,
+            )
             return None
 
     def get_recent_pages(self, limit: int = 5) -> list[dict]:
@@ -264,7 +332,7 @@ class NotionClient:
                     if title:
                         all_pages.append((p["created_time"], {"page_id": p["id"], "title": title, "database_id": db_id, "database_title": cat}))
             except Exception as e:
-                logger.warning("Query DB %s failed: %s", cat, e)
+                logger.warning("Query DB failed: category=%s db_id=%s error=%s", cat, db_id[:8], e)
         all_pages.sort(key=lambda x: x[0], reverse=True)
         return [p[1] for p in all_pages[:limit]]
 
@@ -286,15 +354,39 @@ class NotionClient:
                     if title and fragment in title.lower():
                         return {"page_id": p["id"], "title": title, "database_id": db_id, "database_title": cat}
             except Exception as e:
-                logger.warning("Query DB %s failed: %s", cat, e)
+                logger.warning("Query DB failed: category=%s db_id=%s error=%s", cat, db_id[:8], e)
         return None
 
     def archive_page(self, page_id: str) -> bool:
         try:
             _retry(self._client.blocks.delete, block_id=page_id)
+            logger.info("Page archived: page_id=%s", page_id[:8] + "..." if len(page_id) > 8 else page_id)
             return True
         except Exception as e:
-            logger.exception("Notion archive_page failed: %s", e)
+            logger.exception("Notion archive_page failed: page_id=%s error=%s", page_id[:8], e)
+            return False
+
+    def update_page(
+        self,
+        page_id: str,
+        *,
+        title: str | None = None,
+        notes: str | None = None,
+    ) -> bool:
+        """Update page title and/or notes. Uses standard property names Name, Notes."""
+        props = {}
+        if title is not None:
+            props["Name"] = {"title": [{"type": "text", "text": {"content": (title or " ")[:2000]}}]}
+        if notes is not None:
+            props["Notes"] = {"rich_text": [{"type": "text", "text": {"content": (notes or "")[:2000]}}]}
+        if not props:
+            return True
+        try:
+            _retry(self._client.pages.update, page_id=page_id, properties=props)
+            logger.info("Page updated: page_id=%s", page_id[:8] + "..." if len(page_id) > 8 else page_id)
+            return True
+        except Exception as e:
+            logger.exception("Notion update_page failed: page_id=%s error=%s", page_id[:8], e)
             return False
 
     def init_databases(self) -> dict[str, str]:
@@ -302,6 +394,54 @@ class NotionClient:
         _init_databases(self._client, self._parent_page_id, self._db_ids)
         self._db_ids_loaded = True
         return dict(self._db_ids)
+
+
+def _is_likely_uuid(s: str) -> bool:
+    """True if string looks like a Notion property id (hex with optional dashes)."""
+    if not s or len(s) < 20:
+        return False
+    clean = s.replace("-", "")
+    return len(clean) == 32 and all(c in "0123456789abcdefABCDEF" for c in clean)
+
+
+def _align_properties_to_schema(raw_props: dict, schema: dict[str, str]) -> dict:
+    """
+    Map our property names to the actual DB property names by type.
+    Handles DBs created in UI or with different locale (e.g. "Название" instead of "Name").
+    Prefers display names over UUID keys when sending to API.
+    When schema is empty we do not send raw_props (would cause 400); caller should handle None/create_page fails.
+    """
+    if not schema:
+        return {}
+    by_type: dict[str, list[str]] = {}
+    for name, t in schema.items():
+        by_type.setdefault(t, []).append(name)
+    # Prefer non-UUID keys (display names) so API gets names, not ids
+    for t, names in by_type.items():
+        by_type[t] = sorted(names, key=lambda n: (1 if _is_likely_uuid(str(n)) else 0, n))
+    result = {}
+    used: dict[str, int] = {}
+    for our_key, our_value in raw_props.items():
+        if not isinstance(our_value, dict):
+            continue
+        prop_type = next(iter(our_value.keys()), None)
+        if not prop_type or prop_type not in by_type:
+            continue
+        candidates = by_type[prop_type]
+        if our_key in candidates:
+            actual_key = our_key
+        else:
+            idx = used.get(prop_type, 0)
+            if idx >= len(candidates):
+                continue
+            actual_key = candidates[idx]
+            used[prop_type] = idx + 1
+        result[actual_key] = our_value
+    has_title = any(
+        isinstance(v, dict) and "title" in v
+        for v in result.values()
+    )
+    return result if has_title else {}
 
 
 def _page_title(page: dict) -> str:
@@ -375,9 +515,10 @@ def _init_databases(client: Client, parent_page_id: str, out: dict[str, str]) ->
             page_size=100,
         )
     except Exception as e:
-        logger.exception("List blocks under parent failed: %s", e)
+        logger.exception("List blocks under parent failed: parent_id=%s error=%s", parent_page_id[:8], e)
         return
-    for block in children.get("results", []):
+    results = children.get("results", [])
+    for block in results:
         if block.get("type") == "child_database":
             raw = (block.get("child_database") or {}).get("title")
             if isinstance(raw, str):
@@ -388,6 +529,8 @@ def _init_databases(client: Client, parent_page_id: str, out: dict[str, str]) ->
                 title = ""
             if title and block.get("id"):
                 out[title] = block["id"]
+    existing = len(out)
+    logger.debug("Found %s existing databases under parent %s", existing, parent_page_id[:8])
     for category in CATEGORIES:
         if category in out:
             continue
@@ -400,6 +543,6 @@ def _init_databases(client: Client, parent_page_id: str, out: dict[str, str]) ->
                 properties=schema,
             )
             out[category] = db["id"]
-            logger.info("Created Notion database: %s", category)
+            logger.info("Created Notion database: category=%s db_id=%s", category, db["id"][:8] + "...")
         except Exception as e:
-            logger.exception("Create database %s failed: %s", category, e)
+            logger.exception("Create database failed: category=%s error=%s", category, e)
