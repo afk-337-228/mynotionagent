@@ -43,14 +43,21 @@ def _process_update_sync(body: bytes) -> None:
     sender_id = _sender_id_from_update(data)
     update_id = data.get("update_id", "?")
     if allowed_id is None or sender_id is None or sender_id != allowed_id:
-        logger.debug("Ignoring update_id=%s from user_id=%s (not allowed)", update_id, sender_id)
+        logger.info("Ignoring update_id=%s from user_id=%s (allowed_id=%s)", update_id, sender_id, allowed_id)
+        print(f"[webhook] Ignoring update_id={update_id} from user_id={sender_id} (allowed={allowed_id})", flush=True)
         return
     logger.info("Processing update_id=%s from user_id=%s", update_id, sender_id)
-    from telegram import Update
-    from bot.main import build_application
-    app = build_application()
-    update = Update.de_json(data, app.bot)
-    asyncio.run(app.process_update(update))
+    print(f"[webhook] Processing update_id={update_id} user_id={sender_id}", flush=True)
+    try:
+        from telegram import Update
+        from bot.main import build_application
+        app = build_application()
+        update = Update.de_json(data, app.bot)
+        asyncio.run(app.process_update(update))
+        logger.info("Update %s processed OK", update_id)
+    except Exception as e:
+        logger.exception("Process update_id=%s failed: %s", update_id, e)
+        raise
 
 
 class handler(BaseHTTPRequestHandler):
@@ -63,11 +70,13 @@ class handler(BaseHTTPRequestHandler):
         try:
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length) if content_length else b""
-            logger.debug("Webhook POST body_size=%s", len(body))
+            logger.info("Webhook POST body_size=%s", len(body))
+            print(f"[webhook] POST body_size={len(body)}", flush=True)
             if body:
                 _process_update_sync(body)
-        except Exception as e:
-            logger.exception("Webhook error: %s", e)
+    except Exception as e:
+        logger.exception("Webhook error: %s", e)
+        print(f"[webhook] ERROR: {e}", flush=True)
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()

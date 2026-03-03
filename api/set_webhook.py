@@ -45,9 +45,8 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         secret = os.getenv("WEBHOOK_SECRET", "").strip()
         token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        vercel_url = (os.getenv("VERCEL_URL") or "").strip()
-        if not vercel_url:
-            vercel_url = os.getenv("VERCEL_PROJECT_PRODUCTION_URL", "").strip()
+        # Prefer production domain so webhook URL is stable (not deployment-specific)
+        vercel_url = (os.getenv("VERCEL_PROJECT_PRODUCTION_URL") or os.getenv("VERCEL_URL") or "").strip()
         base = f"https://{vercel_url}" if vercel_url else ""
         webhook_url = f"{base}/api/webhook" if base else ""
 

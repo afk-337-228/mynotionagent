@@ -26,8 +26,8 @@ Open-source Telegram-бот для личного использования: п
 1. Открой [Notion Integrations](https://www.notion.so/my-integrations), нажми **New integration**.
 2. Укажи имя, выбери workspace. Сохрани **Internal Integration Token** (Secret) — это твой `NOTION_API_KEY`.
 3. Создай в Notion обычную страницу, внутри которой будут создаваться базы (категории). Открой эту страницу в браузере. URL будет вида:  
-   `https://www.notion.so/My-Page-3177de489569809988c6fb0522abcf6c`  
-   Идентификатор страницы — последняя часть без дефисов: `3177de489569809988c6fb0522abcf6c` — это `NOTION_PARENT_PAGE_ID`.
+   `https://www.notion.so/My-Page-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+   Идентификатор страницы — последняя часть без дефисов (32 символа): `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` — это `NOTION_PARENT_PAGE_ID`.
 4. На этой странице в правом верхнем углу нажми **…** → **Connections** → добавь созданную интеграцию. Без этого интеграция не сможет создавать базы и страницы на этой странице.
 5. Рекомендация: давай интеграции доступ только к этой одной странице (минимальные права).
 
