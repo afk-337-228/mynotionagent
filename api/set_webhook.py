@@ -45,10 +45,14 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         secret = os.getenv("WEBHOOK_SECRET", "").strip()
         token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        # Use Host from request so webhook URL = domain user opened (e.g. fdkejrtfkvrkfwektfe.vercel.app)
-        host = (self.headers.get("Host") or "").strip()
-        if not host:
-            host = (os.getenv("VERCEL_PROJECT_PRODUCTION_URL") or os.getenv("VERCEL_URL") or "").strip()
+        # Prefer PRODUCTION_DOMAIN (set in Vercel) so webhook URL is always correct, no typo from Host
+        production_domain = (os.getenv("PRODUCTION_DOMAIN") or "").strip()
+        if production_domain:
+            host = production_domain
+        else:
+            host = (self.headers.get("Host") or "").strip()
+            if not host:
+                host = (os.getenv("VERCEL_PROJECT_PRODUCTION_URL") or os.getenv("VERCEL_URL") or "").strip()
         base = f"https://{host}" if host else ""
         webhook_url = f"{base}/api/webhook" if base else ""
 

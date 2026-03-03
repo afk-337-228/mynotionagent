@@ -92,8 +92,9 @@ Open-source Telegram-бот для личного использования: п
 | `OPENROUTER_API_KEY` | openrouter.ai |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` |
 | `WEBHOOK_SECRET` | Придумай длинную случайную строку (например с [randomkeygen](https://randomkeygen.com/)) — понадобится один раз для шага 4. |
+| `PRODUCTION_DOMAIN` | **Рекомендуется для Vercel.** Домен без `https://`, например `fdkejrtfkvrkfwektfe.vercel.app`. Тогда вебхук всегда выставится на этот URL, без опечаток из браузера. |
 
-Остальные (`LOG_LEVEL`, `WHISPER_MODE`) можно не трогать или выставить по желанию.
+Остальные (`LOG_LEVEL` и т.д.) можно не трогать или выставить по желанию.
 
 Выбери окружения: **Production**, **Preview**, **Development** — хотя бы Production. Сохрани (**Save**).
 
