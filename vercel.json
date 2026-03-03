@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "outputDirectory": ".",
+  "outputDirectory": "public",
   "functions": {
     "api/**/*.py": {
       "memory": 1024,
