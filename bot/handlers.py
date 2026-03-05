@@ -88,7 +88,7 @@ def _heuristic_route(text: str) -> tuple[str, str | None] | None:
             return ("YouTube / Видео", url)
         if "t.me/" in u or "telegram.me/" in u:
             return ("Тг посты", url)
-        return ("Ссылки / Статьи", url)
+        return None
 
     if "github.com" in lower or "gitlab.com" in lower:
         return ("Гитхаб репы", None)
@@ -96,9 +96,6 @@ def _heuristic_route(text: str) -> tuple[str, str | None] | None:
         return ("YouTube / Видео", None)
     if "t.me/" in lower or "telegram.me/" in lower:
         return ("Тг посты", None)
-    if "http://" in lower or "https://" in lower or "www." in lower:
-        return ("Ссылки / Статьи", None)
-
     if any(h in lower for h in _TASK_HINTS):
         return ("Задачи на сегодня/завтра", None)
 

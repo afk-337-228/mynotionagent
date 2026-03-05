@@ -130,13 +130,6 @@ class TestResolveDueDateFromIntent(unittest.TestCase):
 
 
 class TestHeuristicRoute(unittest.TestCase):
-    def test_url_links(self):
-        r = _heuristic_route("Ссылка https://example.com/article")
-        self.assertIsNotNone(r)
-        cat, url = r
-        self.assertEqual(cat, "Ссылки / Статьи")
-        self.assertEqual(url, "https://example.com/article")
-
     def test_github(self):
         r = _heuristic_route("https://github.com/user/repo")
         self.assertIsNotNone(r)
