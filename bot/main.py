@@ -25,14 +25,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_app: Application | None = None
-
-
 def build_application() -> Application:
-    """Build and return configured Application (idempotent per process)."""
-    global _app
-    if _app is not None:
-        return _app
+    """Build and return configured Application."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     user_id_str = os.getenv("TELEGRAM_USER_ID")
     notion_key = os.getenv("NOTION_API_KEY")
@@ -63,7 +57,6 @@ def build_application() -> Application:
         openrouter_api_key=openrouter_key,
         openrouter_base_url=openrouter_url,
     )
-    _app = application
     logger.info(
         "Application built: allowed_user_id=%s, notion_parent=%s...",
         allowed_user_id,

@@ -20,6 +20,8 @@ class TestNormalizeCategory(unittest.TestCase):
         self.assertEqual(normalize_category("крипту"), "Крипта")
         self.assertEqual(normalize_category("задачи"), "Задачи на сегодня/завтра")
         self.assertEqual(normalize_category("спорт"), "Спорт")
+        self.assertEqual(normalize_category("гитхаб"), "Гитхаб репы")
+        self.assertEqual(normalize_category("репо"), "Гитхаб репы")
 
     def test_empty_or_unknown(self):
         self.assertIsNone(normalize_category(""))

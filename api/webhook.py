@@ -33,8 +33,7 @@ def _sender_id_from_update(data: dict) -> int | None:
     return None
 
 
-def _process_update_sync(body: bytes) -> None:
-    data = json.loads(body.decode("utf-8"))
+def _process_update_sync(data: dict) -> None:
     try:
         allowed_id_str = os.getenv("TELEGRAM_USER_ID", "").strip()
         allowed_id = int(allowed_id_str) if allowed_id_str else None
@@ -52,8 +51,14 @@ def _process_update_sync(body: bytes) -> None:
         from telegram import Update
         from bot.main import build_application
         app = build_application()
-        update = Update.de_json(data, app.bot)
-        asyncio.run(app.process_update(update))
+
+        async def _run() -> None:
+            await app.initialize()
+            update = Update.de_json(data, app.bot)
+            await app.process_update(update)
+            await app.shutdown()
+
+        asyncio.run(_run())
         logger.info("Update %s processed OK", update_id)
     except Exception as e:
         logger.exception("Process update_id=%s failed: %s", update_id, e)
@@ -73,10 +78,11 @@ class handler(BaseHTTPRequestHandler):
             logger.info("Webhook POST body_size=%s", len(body))
             print(f"[webhook] POST body_size={len(body)}", flush=True)
             if body:
-                _process_update_sync(body)
-    except Exception as e:
-        logger.exception("Webhook error: %s", e)
-        print(f"[webhook] ERROR: {e}", flush=True)
+                data = json.loads(body.decode("utf-8"))
+                _process_update_sync(data)
+        except Exception as e:
+            logger.exception("Webhook error: %s", e)
+            print(f"[webhook] ERROR: {e}", flush=True)
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()

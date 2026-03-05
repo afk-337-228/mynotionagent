@@ -12,7 +12,7 @@ from notion_client.errors import APIResponseError
 
 logger = logging.getLogger(__name__)
 
-# All 18 categories (exact names for Notion)
+# All categories (exact names for Notion)
 CATEGORIES = [
     "Книги к прочтению",
     "YouTube / Видео",
@@ -32,6 +32,7 @@ CATEGORIES = [
     "Тг посты",
     "Фильмы / Сериалы",
     "Крипта",
+    "Гитхаб репы",
 ]
 
 # Aliases for fuzzy match (user says "книги" -> "Книги к прочтению")
@@ -70,7 +71,14 @@ CATEGORY_ALIASES: dict[str, str] = {
     "сериалы": "Фильмы / Сериалы",
     "крипта": "Крипта",
     "крипту": "Крипта",
+    "крипты": "Крипта",
     "крипто": "Крипта",
+    "гитхаб репы": "Гитхаб репы",
+    "гитхаб": "Гитхаб репы",
+    "репы": "Гитхаб репы",
+    "репо": "Гитхаб репы",
+    "репозитории": "Гитхаб репы",
+    "github": "Гитхаб репы",
 }
 
 
@@ -179,7 +187,7 @@ def _schema_for_category(category: str) -> dict:
         return _tasks_properties()
     if category == "Фильмы / Сериалы":
         return _films_properties()
-    if category in ("Ссылки / Статьи", "Полезные сайты"):
+    if category in ("Ссылки / Статьи", "Полезные сайты", "Гитхаб репы"):
         return _links_properties()
     return _universal_properties()
 
@@ -315,6 +323,34 @@ class NotionClient:
             )
             return None
 
+    def get_recent_pages_in_category(self, category: str, limit: int = 1) -> list[dict]:
+        """Get the most recent page(s) in a given category database."""
+        self._ensure_db_ids()
+        db_id = self._db_ids.get(category)
+        if not db_id:
+            return []
+        try:
+            r = _retry(
+                self._client.databases.query,
+                database_id=db_id,
+                page_size=limit,
+                sorts=[{"timestamp": "created_time", "direction": "descending"}],
+            )
+            out = []
+            for p in r.get("results", []):
+                title = _page_title(p)
+                if title:
+                    out.append({
+                        "page_id": p["id"],
+                        "title": title,
+                        "database_id": db_id,
+                        "database_title": category,
+                    })
+            return out
+        except Exception as e:
+            logger.warning("get_recent_pages_in_category failed: category=%s error=%s", category[:20], e)
+            return []
+
     def get_recent_pages(self, limit: int = 5) -> list[dict]:
         """Get last added pages across all DBs (by created_time)."""
         self._ensure_db_ids()
@@ -335,6 +371,77 @@ class NotionClient:
                 logger.warning("Query DB failed: category=%s db_id=%s error=%s", cat, db_id[:8], e)
         all_pages.sort(key=lambda x: x[0], reverse=True)
         return [p[1] for p in all_pages[:limit]]
+
+    def get_tasks_due_today(self, limit: int = 15) -> list[dict]:
+        """Get tasks from 'Задачи на сегодня/завтра' with Due Date = today."""
+        from datetime import datetime, timezone
+        self._ensure_db_ids()
+        db_id = self._db_ids.get("Задачи на сегодня/завтра")
+        if not db_id:
+            return []
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            r = _retry(
+                self._client.databases.query,
+                database_id=db_id,
+                page_size=limit,
+                filter={
+                    "property": "Due Date",
+                    "date": {"equals": today},
+                },
+                sorts=[{"timestamp": "created_time", "direction": "descending"}],
+            )
+            out = []
+            for p in r.get("results", []):
+                title = _page_title(p)
+                if title:
+                    out.append({
+                        "page_id": p["id"],
+                        "title": title,
+                        "url": p.get("url"),
+                        "database_title": "Задачи на сегодня/завтра",
+                    })
+            return out
+        except Exception as e:
+            logger.warning("get_tasks_due_today failed: db_id=%s error=%s", db_id[:8], e)
+            return []
+
+    def search_pages(self, query: str, limit: int = 10) -> list[dict]:
+        """Search across workspace, return only pages from our category databases."""
+        self._ensure_db_ids()
+        our_db_ids = {db_id.replace("-", "") for db_id in self._db_ids.values()}
+        if not query or not our_db_ids:
+            return []
+        try:
+            r = _retry(
+                self._client.search,
+                query=query.strip(),
+                filter={"property": "object", "value": "page"},
+                page_size=min(limit * 2, 25),
+            )
+            out = []
+            for p in r.get("results", []):
+                parent = p.get("parent") or {}
+                if parent.get("type") != "database_id":
+                    continue
+                db_id = (parent.get("database_id") or "").replace("-", "")
+                if db_id not in our_db_ids:
+                    continue
+                title = _page_title(p)
+                if title:
+                    cat = next((c for c, did in self._db_ids.items() if (did or "").replace("-", "") == db_id), "")
+                    out.append({
+                        "page_id": p["id"],
+                        "title": title,
+                        "url": p.get("url"),
+                        "database_title": cat,
+                    })
+                if len(out) >= limit:
+                    break
+            return out
+        except Exception as e:
+            logger.warning("search_pages failed: query=%s error=%s", query[:50], e)
+            return []
 
     def find_page_by_title_fragment(self, fragment: str) -> dict | None:
         """Search in all DBs for a page whose title contains fragment."""
@@ -372,13 +479,16 @@ class NotionClient:
         *,
         title: str | None = None,
         notes: str | None = None,
+        status: str | None = None,
     ) -> bool:
-        """Update page title and/or notes. Uses standard property names Name, Notes."""
+        """Update page title, notes and/or status. Uses standard property names Name, Notes, Status."""
         props = {}
         if title is not None:
             props["Name"] = {"title": [{"type": "text", "text": {"content": (title or " ")[:2000]}}]}
         if notes is not None:
             props["Notes"] = {"rich_text": [{"type": "text", "text": {"content": (notes or "")[:2000]}}]}
+        if status is not None:
+            props["Status"] = {"select": {"name": status}}
         if not props:
             return True
         try:
@@ -387,6 +497,55 @@ class NotionClient:
             return True
         except Exception as e:
             logger.exception("Notion update_page failed: page_id=%s error=%s", page_id[:8], e)
+            return False
+
+    def _get_done_status_value(self, category: str) -> str | None:
+        """Return the 'done' status option for this category, or None if no Status/done."""
+        if category == "Задачи на сегодня/завтра":
+            return "Выполнена"
+        if category == "Книги к прочтению":
+            return "Прочитана"
+        if category == "Фильмы / Сериалы":
+            return "Посмотрел"
+        return None
+
+    def _get_category_by_page_id(self, page_id: str) -> str | None:
+        """Get category (database title) for a page. Returns None if not found."""
+        try:
+            page = _retry(self._client.pages.retrieve, page_id=page_id)
+            parent = page.get("parent") or {}
+            if parent.get("type") != "database_id":
+                return None
+            db_id = parent.get("database_id") or ""
+            if not db_id:
+                return None
+            self._ensure_db_ids()
+            for cat, did in self._db_ids.items():
+                if (did or "").replace("-", "") == (db_id or "").replace("-", ""):
+                    return cat
+            return None
+        except Exception as e:
+            logger.warning("Could not get category for page_id=%s: %s", page_id[:8] if page_id else "", e)
+            return None
+
+    def mark_done_and_archive(self, page_id: str, category: str | None = None) -> bool:
+        """
+        Mark note as done (set Status to done value where applicable) and archive the page.
+        If category is None, it is resolved from the page's parent database.
+        """
+        cat = category
+        if cat is None:
+            cat = self._get_category_by_page_id(page_id)
+        if cat:
+            done_value = self._get_done_status_value(cat)
+            if done_value:
+                try:
+                    self.update_page(page_id, status=done_value)
+                except Exception:
+                    pass  # DB may have no Status; archive anyway
+        try:
+            return self.archive_page(page_id)
+        except Exception:
             return False
 
     def init_databases(self) -> dict[str, str]:
@@ -465,8 +624,8 @@ def _build_properties(
     status: str | None = None,
     due_date: str | None = None,
 ) -> dict:
-    from datetime import datetime
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     def title_val(t: str) -> list:
         return [{"type": "text", "text": {"content": (t or " ")[:2000]}}]
@@ -497,7 +656,7 @@ def _build_properties(
     if category == "Фильмы / Сериалы":
         base["Status"] = {"select": select_val(status or "Хочу посмотреть")}
         return base
-    if category in ("Ссылки / Статьи", "Полезные сайты"):
+    if category in ("Ссылки / Статьи", "Полезные сайты", "Гитхаб репы"):
         if url:
             base["URL"] = {"url": url}
         return base
