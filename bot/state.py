@@ -26,6 +26,8 @@ def _db_path() -> Path:
     import os
     if os.getenv("STATE_DB_PATH"):
         return Path(os.environ["STATE_DB_PATH"])
+    if os.getenv("VERCEL"):
+        return Path("/tmp/state.db")
     return Path(__file__).resolve().parent.parent / "state.db"
 
 
